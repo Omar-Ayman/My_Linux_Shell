@@ -6,8 +6,9 @@
 #include <fcntl.h>
 
 typedef enum ExecutionMode {
-    Normal,
-    ToFile,
+    WriteToFile = 0,
+    AppendToFile = 1,
+    Normal = 2,
 } ExecutionMode;
 
 #define COMMAND_BUFFER_SIZE 256
@@ -15,6 +16,7 @@ typedef enum ExecutionMode {
 
 int main() {
     char ws[] = " \n\r\t";
+    char fileModes[][3] = {"w+", "a+"};
     char line[COMMAND_BUFFER_SIZE], *tokens[COMMAND_BUFFER_SIZE >> 1], **token, *output, writeBuffer[WRITE_BUFFER_SIZE + 1];
     ExecutionMode mode;
     int p[2], bufferCount;
@@ -36,10 +38,13 @@ int main() {
         mode = Normal;
 
         while (*++token = strtok(NULL, ws)) {
-            if (!strcmp(*token, ">")) {
+            if ((*token)[0] == '>') {
+                if ((*token)[1] == '>')
+                    mode = AppendToFile;
+                else
+                    mode = WriteToFile;
                 *token = NULL;
                 output = strtok(NULL, ws);
-                mode = ToFile;
                 break;
             }
         }
@@ -54,19 +59,19 @@ int main() {
             }
         } else {
             pipe(p);
-            if (mode == ToFile) {
-                if (!fork()) {
-                    dup2(p[1], 1);
-                    close(p[0]);
-                    execvp(tokens[0], tokens);
-                    printf("%s was not recognized as a command\n", tokens[0]);
-                    return 2;
-                }
-                
+            if (!fork()) {
+                dup2(p[1], 1);
+                close(p[0]);
+                execvp(tokens[0], tokens);
+                printf("%s was not recognized as a command\n", tokens[0]);
+                return 2;
+            }
+            
+            if (mode == WriteToFile || mode == AppendToFile) {
                 if (!fork()) {
                     dup2(p[0], 0);
                     close(p[1]);
-                    if (!(fd = fopen(output, "w"))) {
+                    if (!(fd = fopen(output, fileModes[mode]))) {
                         printf("could not write in file %s\n", output);
                         return 3;
                     }
@@ -77,12 +82,12 @@ int main() {
                     fclose(fd);
                     return 0;
                 }
-
-                close(p[0]);
-                close(p[1]);
-                wait(0);
-                wait(0);
             }
+
+            close(p[0]);
+            close(p[1]);
+            wait(0);
+            wait(0);
         }
     }
 }
