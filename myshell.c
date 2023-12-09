@@ -5,23 +5,99 @@
 #include <stdlib.h>
 #include <fcntl.h>
 
+#define debug(S, ...) {printf("????? ");printf(S __VA_OPT__(,) __VA_ARGS__);printf("\n");}
+#define return_err(ERR) if (ERR != -1) return ERR;
+
 typedef enum ExecutionMode {
-    WriteToFile = 0,
-    AppendToFile = 1,
-    Normal = 2,
+    Exit = 0,
+    WriteToFile = 1,
+    AppendToFile = 2,
+    Normal = 3,
+    Pipe,
 } ExecutionMode;
 
 #define COMMAND_BUFFER_SIZE 256
 #define WRITE_BUFFER_SIZE 1024
+#define WS " \n\r\t"
+
+int exec_cmd(char **tokens, char *writeBuffer) {
+    ExecutionMode mode = Normal;
+    int p[2], bufferCount, err;
+    FILE *fd;
+    char const fileModes[][3] = {"w+", "a+"};
+    char *output, **token = tokens;
+
+    while (*++token = strtok(NULL, WS)) {
+        if ((*token)[0] == '>') {
+            if ((*token)[1] == '>')
+                mode = AppendToFile;
+            else
+                mode = WriteToFile;
+            *token = NULL;
+            output = strtok(NULL, WS);
+            break;
+        } else if (!strcmp(*token, "|")) {
+            mode = Pipe;
+            *token = NULL;
+            break;
+        }
+    }
+
+    if (mode == Normal) {
+        if (!fork()) {
+            execvp(tokens[0], tokens);
+            printf("%s was not recognized as a command\n", tokens[0]);
+            return 1;
+        } else {
+            wait(0);
+        }
+    } else {
+        pipe(p);
+        if (!fork()) {
+            dup2(p[1], 1);
+            close(p[0]);
+            execvp(tokens[0], tokens);
+            printf("%s was not recognized as a command\n", tokens[0]);
+            return 2;
+        }
+        
+        if (!fork()) {
+            dup2(p[0], 0);
+            close(p[1]);
+            if (mode == WriteToFile || mode == AppendToFile) {
+                if (!(fd = fopen(output, fileModes[mode - WriteToFile]))) {
+                    printf("could not write in file %s\n", output);
+                    return 3;
+                }
+                while (fgets(writeBuffer, WRITE_BUFFER_SIZE, stdin)) {
+                    fprintf(fd, "%s", writeBuffer);
+                }
+
+                fclose(fd);
+            }
+
+            if (mode == Pipe) {
+                *tokens = strtok(NULL, WS);
+                err = exec_cmd(tokens, writeBuffer);
+                return_err(err);
+            }
+
+            return 0;
+        }
+
+        close(p[0]);
+        close(p[1]);
+        wait(0);
+        wait(0);
+    }
+
+    return -1;
+}
 
 int main() {
-    char ws[] = " \n\r\t";
-    char fileModes[][3] = {"w+", "a+"};
-    char line[COMMAND_BUFFER_SIZE], *tokens[COMMAND_BUFFER_SIZE >> 1], **token, *output, writeBuffer[WRITE_BUFFER_SIZE + 1];
-    ExecutionMode mode;
-    int p[2], bufferCount;
-    FILE *fd;
-
+    int err;
+    char line[COMMAND_BUFFER_SIZE], *tokens[COMMAND_BUFFER_SIZE >> 1], writeBuffer[WRITE_BUFFER_SIZE + 1];
+    
     writeBuffer[WRITE_BUFFER_SIZE] = 0;
 
     while (1) {
@@ -31,63 +107,10 @@ int main() {
             return -1;
         }
 
-        token = tokens;
-        if (!(*token = strtok(line, ws)))
+        if (!(*tokens = strtok(line, WS)))
             continue;
 
-        mode = Normal;
-
-        while (*++token = strtok(NULL, ws)) {
-            if ((*token)[0] == '>') {
-                if ((*token)[1] == '>')
-                    mode = AppendToFile;
-                else
-                    mode = WriteToFile;
-                *token = NULL;
-                output = strtok(NULL, ws);
-                break;
-            }
-        }
-
-        if (mode == Normal) {
-            if (!fork()) {
-                execvp(tokens[0], tokens);
-                printf("%s was not recognized as a command\n", tokens[0]);
-                return 1;
-            } else {
-                wait(0);
-            }
-        } else {
-            pipe(p);
-            if (!fork()) {
-                dup2(p[1], 1);
-                close(p[0]);
-                execvp(tokens[0], tokens);
-                printf("%s was not recognized as a command\n", tokens[0]);
-                return 2;
-            }
-            
-            if (mode == WriteToFile || mode == AppendToFile) {
-                if (!fork()) {
-                    dup2(p[0], 0);
-                    close(p[1]);
-                    if (!(fd = fopen(output, fileModes[mode]))) {
-                        printf("could not write in file %s\n", output);
-                        return 3;
-                    }
-                    while (fgets(writeBuffer, WRITE_BUFFER_SIZE, stdin)) {
-                        fprintf(fd, "%s", writeBuffer);
-                    }
-
-                    fclose(fd);
-                    return 0;
-                }
-            }
-
-            close(p[0]);
-            close(p[1]);
-            wait(0);
-            wait(0);
-        }
+        err = exec_cmd(tokens, writeBuffer);
+        return_err(err);
     }
 }
