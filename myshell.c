@@ -18,6 +18,7 @@ typedef enum ExecutionMode {
 
 #define COMMAND_BUFFER_SIZE 256
 #define WRITE_BUFFER_SIZE 1024
+#define DIR_BUFFER_SIZE 256
 #define WS " \n\r\t"
 
 int exec_cmd(char **tokens, char *writeBuffer) {
@@ -44,7 +45,11 @@ int exec_cmd(char **tokens, char *writeBuffer) {
     }
 
     if (mode == Normal) {
-        if (!fork()) {
+        if (!strcmp(tokens[0], "cd")) {
+            if (chdir(tokens[1])) {
+                printf("couldn't find a directory with the name \"%s\"\n", tokens[1]);
+            }
+        } else if (!fork()) {
             execvp(tokens[0], tokens);
             printf("%s was not recognized as a command\n", tokens[0]);
             return 1;
@@ -96,12 +101,12 @@ int exec_cmd(char **tokens, char *writeBuffer) {
 
 int main() {
     int err;
-    char line[COMMAND_BUFFER_SIZE], *tokens[COMMAND_BUFFER_SIZE >> 1], writeBuffer[WRITE_BUFFER_SIZE + 1];
+    char line[COMMAND_BUFFER_SIZE], *tokens[COMMAND_BUFFER_SIZE >> 1], writeBuffer[WRITE_BUFFER_SIZE + 1], dir[DIR_BUFFER_SIZE];
     
     writeBuffer[WRITE_BUFFER_SIZE] = 0;
 
     while (1) {
-        printf("=> ");
+        printf("%s => ", getcwd(dir, DIR_BUFFER_SIZE));
         if (!fgets(line, COMMAND_BUFFER_SIZE, stdin)) {
             printf("couldn't read line:\n");
             return -1;
