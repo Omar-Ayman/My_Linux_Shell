@@ -21,7 +21,7 @@ typedef enum ExecutionMode {
 #define DIR_BUFFER_SIZE 256
 #define WS " \n\r\t"
 
-int exec_cmd(char **tokens, char *writeBuffer) {
+int exec_cmd(char **tokens, char *writeBuffer, int hidden) {
     ExecutionMode mode = Normal;
     int p[2], bufferCount, err;
     FILE *fd;
@@ -53,7 +53,7 @@ int exec_cmd(char **tokens, char *writeBuffer) {
             execvp(tokens[0], tokens);
             printf("%s was not recognized as a command\n", tokens[0]);
             return 1;
-        } else {
+        } else if (!hidden) {
             wait(0);
         }
     } else {
@@ -83,7 +83,7 @@ int exec_cmd(char **tokens, char *writeBuffer) {
 
             if (mode == Pipe) {
                 *tokens = strtok(NULL, WS);
-                err = exec_cmd(tokens, writeBuffer);
+                err = exec_cmd(tokens, writeBuffer, hidden);
                 return_err(err);
             }
 
@@ -92,15 +92,18 @@ int exec_cmd(char **tokens, char *writeBuffer) {
 
         close(p[0]);
         close(p[1]);
-        wait(0);
-        wait(0);
+        if (!hidden) {
+            wait(0);
+            wait(0);
+        }
     }
 
     return -1;
 }
 
 int main() {
-    int err;
+    int err, hidden;
+    size_t end;
     char line[COMMAND_BUFFER_SIZE], *tokens[COMMAND_BUFFER_SIZE >> 1], writeBuffer[WRITE_BUFFER_SIZE + 1], dir[DIR_BUFFER_SIZE];
     
     writeBuffer[WRITE_BUFFER_SIZE] = 0;
@@ -112,10 +115,19 @@ int main() {
             return -1;
         }
 
+        end = strlen(line) - 2;
+
+        if (line[end] == '&') {
+            hidden = 1;
+            line[end] = 0;
+        } else {
+            hidden = 0;
+        }
+
         if (!(*tokens = strtok(line, WS)))
             continue;
 
-        err = exec_cmd(tokens, writeBuffer);
+        err = exec_cmd(tokens, writeBuffer, hidden);
         return_err(err);
     }
 }
